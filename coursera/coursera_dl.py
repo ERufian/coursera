@@ -16,7 +16,7 @@ For further documentation and examples, visit the project's home at:
 
 Authors and copyright:
     © 2012-2013, John Lehmann (first last at geemail dotcom or @jplehmann)
-    © 2012-2014, Rogério Brito (r lastname at ime usp br)
+    © 2012-2015, Rogério Brito (r lastname at ime usp br)
     © 2013, Jonas De Taeye (first dt at fastmail fm)
 
 Contributions are welcome, but please add new unit tests to test your changes
@@ -86,8 +86,8 @@ _see_url = " See https://github.com/coursera-dl/coursera/issues/139"
 import bs4
 import six
 
-assert V(requests.__version__) >= V('2.2.1'), "Upgrade requests!" + _see_url
-assert V(six.__version__) >= V('1.3'), "Upgrade six!" + _see_url
+assert V(requests.__version__) >= V('2.4'), "Upgrade requests!" + _see_url
+assert V(six.__version__) >= V('1.5'), "Upgrade six!" + _see_url
 assert V(bs4.__version__) >= V('4.1'), "Upgrade bs4!" + _see_url
 
 

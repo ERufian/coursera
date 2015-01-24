@@ -117,6 +117,11 @@ def login(session, class_name, username, password):
                      headers=headers, allow_redirects=False)
     try:
         r.raise_for_status()
+
+        # Some how the order of cookies parameters are important
+        # for coursera!!!
+        v = session.cookies.pop('CAUTH')
+        session.cookies.set('CAUTH', v)
     except requests.exceptions.HTTPError:
         raise AuthenticationFailed('Cannot login on accounts.coursera.org.')
 
@@ -142,21 +147,6 @@ def down_the_wabbit_hole(session, class_name):
     logging.debug('Exiting "deep" authentication.')
 
 
-def _get_authentication_cookies(session, class_name,
-                                username, password):
-    try:
-        session.cookies.clear('class.coursera.org', '/' + class_name)
-    except KeyError:
-        pass
-
-    down_the_wabbit_hole(session, class_name)
-
-    enough = do_we_have_enough_cookies(session.cookies, class_name)
-
-    if not enough:
-        raise AuthenticationFailed('Did not find necessary cookies.')
-
-
 def get_authentication_cookies(session, class_name, username, password):
     """
     Get the necessary cookies to authenticate on class.coursera.org.
@@ -171,9 +161,17 @@ def get_authentication_cookies(session, class_name, username, password):
     else:
         login(session, class_name, username, password)
 
-    # FIXME: put the previous function body here.
-    _get_authentication_cookies(
-        session, class_name, username, password)
+    try:
+        session.cookies.clear('class.coursera.org', '/' + class_name)
+    except KeyError:
+        pass
+
+    down_the_wabbit_hole(session, class_name)
+
+    enough = do_we_have_enough_cookies(session.cookies, class_name)
+
+    if not enough:
+        raise AuthenticationFailed('Did not find necessary cookies.')
 
     logging.info('Found authentication cookies.')
 
