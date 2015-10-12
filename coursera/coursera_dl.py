@@ -1,11 +1,37 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# Authors and copyright:
+#     © 2012-2013, John Lehmann (first last at geemail dotcom or @jplehmann)
+#     © 2012-2015, Rogério Brito (r lastname at ime usp br)
+#     © 2013, Jonas De Taeye (first dt at fastmail fm)
+#
+# Contributions are welcome, but please add new unit tests to test your changes
+# and/or features.  Also, please try to make changes platform independent and
+# backward compatible.
+#
+# Legalese:
+#
+#  This program is free software: you can redistribute it and/or modify it
+#  under the terms of the GNU Lesser General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or (at your
+#  option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 """
-For downloading lecture resources such as videos for Coursera classes. Given
-a class name, username and password, it scrapes the course listing page to
-get the section (week) and lecture names, and then downloads the related
-materials into appropriately named files and directories.
+Module for downloading lecture resources such as videos for Coursera classes.
+
+Given a class name, username and password, it scrapes the course listing
+page to get the section (week) and lecture names, and then downloads the
+related materials into appropriately named files and directories.
 
 Examples:
   coursera-dl -u <user> -p <passwd> saas
@@ -13,35 +39,12 @@ Examples:
 
 For further documentation and examples, visit the project's home at:
   https://github.com/coursera-dl/coursera
-
-Authors and copyright:
-    © 2012-2013, John Lehmann (first last at geemail dotcom or @jplehmann)
-    © 2012-2015, Rogério Brito (r lastname at ime usp br)
-    © 2013, Jonas De Taeye (first dt at fastmail fm)
-
-Contributions are welcome, but please add new unit tests to test your changes
-and/or features.  Also, please try to make changes platform independent and
-backward compatible.
-
-Legalese:
-
- This program is free software: you can redistribute it and/or modify it
- under the terms of the GNU Lesser General Public License as published by
- the Free Software Foundation, either version 3 of the License, or (at your
- option) any later version.
-
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
-
- You should have received a copy of the GNU General Public License
- along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 
 import argparse
 import datetime
+import glob
 import json
 import logging
 import os
@@ -50,51 +53,103 @@ import shutil
 import subprocess
 import sys
 import time
-import glob
 
 from distutils.version import LooseVersion as V
 
 import requests
-from six import iteritems
 
-try:
-    from BeautifulSoup import BeautifulSoup
-except ImportError:
-    from bs4 import BeautifulSoup as BeautifulSoup_
-    try:
-        # Use html5lib for parsing if available
-        import html5lib
-        BeautifulSoup = lambda page: BeautifulSoup_(page, 'html5lib')
-    except ImportError:
-        BeautifulSoup = lambda page: BeautifulSoup_(page, 'html.parser')
+from six import iteritems
+from bs4 import BeautifulSoup as BeautifulSoup_
+
+# Force us of bs4 with html5lib
+BeautifulSoup = lambda page: BeautifulSoup_(page, 'html5lib')
 
 
 from .cookies import (
     AuthenticationFailed, ClassNotFound,
-    get_cookies_for_class, make_cookie_values)
-from .credentials import get_credentials, CredentialsError
-from .define import CLASS_URL, ABOUT_URL, PATH_CACHE
+    get_cookies_for_class, make_cookie_values, login, TLSAdapter)
+from .credentials import get_credentials, CredentialsError, keyring
+from .define import (CLASS_URL, ABOUT_URL, PATH_CACHE,
+                     OPENCOURSE_CONTENT_URL, OPENCOURSE_VIDEO_URL)
 from .downloaders import get_downloader
-from .utils import clean_filename, get_anchor_format, mkdir_p, fix_url
-from .utils import decode_input
+from .utils import (clean_filename, get_anchor_format, mkdir_p, fix_url,
+                    decode_input, make_coursera_absolute_url)
 
 # URL containing information about outdated modules
-_see_url = " See https://github.com/coursera-dl/coursera/issues/139"
+_SEE_URL = " See https://github.com/coursera-dl/coursera/issues/139"
 
 # Test versions of some critical modules.
 # We may, perhaps, want to move these elsewhere.
 import bs4
 import six
 
-assert V(requests.__version__) >= V('2.4'), "Upgrade requests!" + _see_url
-assert V(six.__version__) >= V('1.5'), "Upgrade six!" + _see_url
-assert V(bs4.__version__) >= V('4.1'), "Upgrade bs4!" + _see_url
+assert V(requests.__version__) >= V('2.4'), "Upgrade requests!" + _SEE_URL
+assert V(six.__version__) >= V('1.5'), "Upgrade six!" + _SEE_URL
+assert V(bs4.__version__) >= V('4.1'), "Upgrade bs4!" + _SEE_URL
+
+
+def get_on_demand_video_url(session, video_id, subtitle_language='en',
+                            resolution='540p'):
+    """
+    Return the download URL of on-demand course video.
+    """
+
+    url = OPENCOURSE_VIDEO_URL.format(video_id=video_id)
+    page = get_page(session, url)
+
+    logging.debug('Parsing JSON for video_id <%s>.', video_id)
+    video_content = {}
+    dom = json.loads(page)
+
+    # videos
+    logging.info('Gathering video URLs for video_id <%s>.', video_id)
+    sources = dom['sources']
+    sources.sort(key=lambda src: src['resolution'])
+    sources.reverse()
+
+    # Try to select resolution requested by the user.
+    filtered_sources = [source
+                        for source in sources
+                        if source['resolution'] == resolution]
+
+    if len(filtered_sources) == 0:
+        # We will just use the 'vanilla' version of sources here, instead of
+        # filtered_sources.
+        logging.warn('Requested resolution %s not availaboe for <%s>. '
+                     'Downloading highest resolution available instead.',
+                     resolution, video_id)
+    else:
+        logging.info('Proceeding with download of resolution %s of <%s>.',
+                     resolution, video_id)
+        sources = filtered_sources
+
+    video_url = sources[0]['formatSources']['video/mp4']
+    video_content['mp4'] = video_url
+
+    # subtitles
+    logging.info('Gathering subtitle URLs for video_id <%s>.', video_id)
+    subtitles = dom.get('subtitles')
+    if subtitles is not None:
+        if subtitle_language != 'en' and subtitle_language not in subtitles:
+            logging.warning("Subtitle unavailable in '%s' language for video "
+                            "with video id: [%s], falling back to 'en' "
+                            "subtitle", subtitle_language, video_id)
+            subtitle_language = 'en'
+
+        subtitle_url = subtitles.get(subtitle_language)
+        if subtitle_url is not None:
+            # some subtitle urls are relative!
+            video_content['srt'] = make_coursera_absolute_url(subtitle_url)
+
+    return video_content
 
 
 def get_syllabus_url(class_name, preview):
     """
-    Return the Coursera index/syllabus URL, depending on if we want to only
-    preview or if we are enrolled in the course.
+    Return the Coursera index/syllabus URL.
+
+    The returned result depends on if we want to only use a preview page or
+    if we are enrolled in the course.
     """
     class_type = 'preview' if preview else 'index'
     page = CLASS_URL.format(class_name=class_name) + '/lecture/' + class_type
@@ -119,10 +174,24 @@ def get_page(session, url):
     return r.text
 
 
+def get_session():
+    """
+    Create a session with TLS v1.2 certificate.
+    """
+
+    session = requests.Session()
+    session.mount('https://', TLSAdapter())
+
+    return session
+
+
 def grab_hidden_video_url(session, href):
     """
-    Follow some extra redirects to grab hidden video URLs (like those from
-    University of Washington).
+    Follow some extra redirects to grab hidden video URLs.
+
+    The first of these "hidden" videos were seen in courses from the
+    University of Washington, but others appeared after that (like in the
+    course Social Psychology).
     """
     try:
         page = get_page(session, href)
@@ -137,9 +206,9 @@ def grab_hidden_video_url(session, href):
         return None
 
 
-def get_syllabus(session, class_name, local_page=False, preview=False):
+def get_old_style_syllabus(session, class_name, local_page=False, preview=False):
     """
-    Get the course listing webpage.
+    Get the old style course listing webpage.
 
     If we are instructed to use a local page and it already exists, then
     that page is used instead of performing a download.  If we are
@@ -164,6 +233,18 @@ def get_syllabus(session, class_name, local_page=False, preview=False):
     return page
 
 
+def get_on_demand_syllabus(session, class_name):
+    """
+    Get the on-demand course listing webpage.
+    """
+
+    url = OPENCOURSE_CONTENT_URL.format(class_name=class_name)
+    page = get_page(session, url)
+    logging.info('Downloaded %s (%d bytes)', url, len(page))
+
+    return page
+
+
 def transform_preview_url(a):
     """
     Given a preview lecture URL, transform it into a regular video URL.
@@ -181,9 +262,9 @@ def transform_preview_url(a):
         return None
 
 
-def get_video(session, url):
+def get_old_style_video(session, url):
     """
-    Parses a Coursera video page
+    Parse a old style Coursera video page.
     """
 
     page = get_page(session, url)
@@ -191,18 +272,20 @@ def get_video(session, url):
     return soup.find(attrs={'type': re.compile('^video/mp4')})['src']
 
 
-def parse_syllabus(session, page, reverse=False, intact_fnames=False):
+def parse_old_style_syllabus(session, page, reverse=False, intact_fnames=False,
+                             subtitle_language='en'):
     """
-    Parses a Coursera course listing/syllabus page.  Each section is a week
-    of classes.
+    Parse an old style Coursera course listing/syllabus page.
+
+    Each section is a week of classes.
     """
 
     sections = []
     soup = BeautifulSoup(page)
 
     # traverse sections
-    for stag in soup.findAll(attrs={'class':
-                                    re.compile('^course-item-list-header')}):
+    stags = soup.findAll(attrs={'class': re.compile('^course-item-list-header')})
+    for stag in stags:
         assert stag.contents[0] is not None, "couldn't find section"
         untouched_fname = stag.contents[0].contents[1]
         section_name = clean_filename(untouched_fname, intact_fnames)
@@ -223,6 +306,10 @@ def parse_syllabus(session, page, reverse=False, intact_fnames=False):
                 untouched_fname = a.get('title', '')
                 title = clean_filename(untouched_fname, intact_fnames)
                 fmt = get_anchor_format(href)
+                if fmt in ('srt', 'txt') and subtitle_language != 'en':
+                    title = title.replace('_en&format', '_' + subtitle_language + '&format')
+                    href = href.replace('_en&format', '_' + subtitle_language + '&format')
+
                 logging.debug('    %s %s', fmt, href)
                 if fmt:
                     lecture[fmt] = lecture.get(fmt, [])
@@ -233,7 +320,7 @@ def parse_syllabus(session, page, reverse=False, intact_fnames=False):
                 lecture_page = transform_preview_url(href)
                 if lecture_page:
                     try:
-                        href = get_video(session, lecture_page)
+                        href = get_old_style_video(session, lecture_page)
                         lecture['mp4'] = lecture.get('mp4', [])
                         lecture['mp4'].append((fix_url(href), ''))
                     except TypeError:
@@ -283,13 +370,61 @@ def parse_syllabus(session, page, reverse=False, intact_fnames=False):
     return sections
 
 
-def download_about(session, class_name, path='', overwrite=False):
+def parse_on_demand_syllabus(session, page, reverse=False, intact_fnames=False,
+                             subtitle_language='en', video_resolution=None):
+    """
+    Parse a Coursera on-demand course listing/syllabus page.
+    """
+
+    dom = json.loads(page)
+
+    logging.info('Parsing syllabus of on-demand course. '
+                 'This may take some time, be patient ...')
+    modules = []
+    json_modules = dom['courseMaterial']['elements']
+    for module in json_modules:
+        module_slug = module['slug']
+        sections = []
+        json_sections = module['elements']
+        for section in json_sections:
+            section_slug = section['slug']
+            lectures = []
+            json_lectures = section['elements']
+            for lecture in json_lectures:
+                lecture_slug = lecture['slug']
+                if lecture['content']['typeName'] == 'lecture':
+                    lecture_video_id = lecture['content']['definition']['videoId']
+                    video_content = get_on_demand_video_url(session,
+                                                            lecture_video_id,
+                                                            subtitle_language,
+                                                            video_resolution)
+                    lecture_video_content = {}
+                    for key, value in video_content.items():
+                        lecture_video_content[key] = [(value, '')]
+
+                    if lecture_video_content:
+                        lectures.append((lecture_slug, lecture_video_content))
+
+            if lectures:
+                sections.append((section_slug, lectures))
+
+        if sections:
+            modules.append((module_slug, sections))
+
+    if modules and reverse:
+        modules.reverse()
+
+    return modules
+
+
+def download_about(session, class_name, path='', overwrite=False,
+                   subtitle_language='en'):
     """
     Download the 'about' metadata which is in JSON format and pretty-print it.
     """
     about_fn = os.path.join(path, class_name + '-about.json')
     logging.debug('About file to be written to: %s', about_fn)
-    if os.path.exists(about_fn) and not overwrite:
+    if os.path.exists(about_fn) and not overwrite and subtitle_language == 'en':
         return
 
     # strip off course number on end e.g. ml-001 -> ml
@@ -309,7 +444,77 @@ def download_about(session, class_name, path='', overwrite=False):
                 json_data = json.dumps(element, indent=4,
                                        separators=(',', ':'))
                 about_file.write(json_data)
-            break
+                return element
+
+
+def is_course_complete(last_update):
+    """
+    Determine is the course is likely to have been terminated or not.
+
+    We return True if the timestamp given by last_update is 30 days or older
+    than today's date.  Otherwise, we return True.
+
+    The intended use case for this is to detect if a given courses has not
+    seen any update in the last 30 days or more.  Otherwise, we return True,
+    since it is probably too soon to declare the course complete.
+    """
+    rv = False
+    if last_update >= 0:
+        delta = time.time() - last_update
+        max_delta = total_seconds(datetime.timedelta(days=30))
+        if delta > max_delta:
+            rv = True
+    return rv
+
+
+def format_section(num, section, class_name, verbose_dirs):
+    sec = '%02d_%s' % (num, section)
+    if verbose_dirs:
+        sec = class_name.upper() + '_' + sec
+    return sec
+
+
+def format_resource(num, name, title, fmt):
+    if title:
+        title = '_' + title
+    return '%02d_%s%s.%s' % (num, name, title, fmt)
+
+
+def format_combine_number_resource(secnum, lecnum, lecname, title, fmt):
+    if title:
+        title = '_' + title
+    return '%02d_%02d_%s%s.%s' % (secnum, lecnum, lecname, title, fmt)
+
+
+def find_resources_to_get(lecture, file_formats, resource_filter, ignored_formats=None):
+    """
+    Select formats to download.
+    """
+    resources_to_get = []
+
+    if ignored_formats is None:
+        ignored_formats = []
+
+    if len(ignored_formats):
+        logging.info("The following file formats will be ignored: " + ",".join(ignored_formats))
+
+    for fmt, resources in iteritems(lecture):
+
+        if fmt in ignored_formats:
+            continue
+
+        if fmt in file_formats or 'all' in file_formats:
+            for r in resources:
+                if resource_filter and r[1] and not re.search(resource_filter, r[1]):
+                    logging.debug('Skipping b/c of rf: %s %s',
+                                  resource_filter, r[1])
+                    continue
+                resources_to_get.append((fmt, r[0], r[1]))
+        else:
+            logging.debug(
+                'Skipping b/c format %s not in %s', fmt, file_formats)
+
+    return resources_to_get
 
 
 def download_lectures(downloader,
@@ -327,29 +532,16 @@ def download_lectures(downloader,
                       combined_section_lectures_nums=False,
                       hooks=None,
                       playlist=False,
-                      intact_fnames=False
-                      ):
+                      intact_fnames=False,
+                      ignored_formats=None,
+                      resume=False,
+                      video_resolution='540p'):
     """
-    Downloads lecture resources described by sections.
-    Returns True if the class appears completed.
+    Download lecture resources described by sections.
+
+    Returns True if the class appears completed, False otherwise.
     """
     last_update = -1
-
-    def format_section(num, section):
-        sec = '%02d_%s' % (num, section)
-        if verbose_dirs:
-            sec = class_name.upper() + '_' + sec
-        return sec
-
-    def format_resource(num, name, title, fmt):
-        if title:
-            title = '_' + title
-        return '%02d_%s%s.%s' % (num, name, title, fmt)
-
-    def format_combine_number_resource(secnum, lecnum, lecname, title, fmt):
-        if title:
-            title = '_' + title
-        return '%02d_%02d_%s%s.%s' % (secnum, lecnum, lecname, title, fmt)
 
     for (secnum, (section, lectures)) in enumerate(sections):
         if section_filter and not re.search(section_filter, section):
@@ -357,8 +549,8 @@ def download_lectures(downloader,
                           section)
             continue
 
-        sec = os.path.join(path, class_name, format_section(secnum + 1,
-                                                            section))
+        sec = os.path.join(path, class_name,
+                           format_section(secnum + 1, section, class_name, verbose_dirs))
         for (lecnum, (lecname, lecture)) in enumerate(lectures):
             if lecture_filter and not re.search(lecture_filter,
                                                 lecname):
@@ -369,22 +561,14 @@ def download_lectures(downloader,
             if not os.path.exists(sec):
                 mkdir_p(sec)
 
-            # Select formats to download
-            resources_to_get = []
-            for fmt, resources in iteritems(lecture):
-                if fmt in file_formats or 'all' in file_formats:
-                    for r in resources:
-                        if resource_filter and r[1] and not re.search(resource_filter, r[1]):
-                            logging.debug('Skipping b/c of rf: %s %s',
-                                          resource_filter, r[1])
-                            continue
-                        resources_to_get.append((fmt, r[0], r[1]))
-                else:
-                    logging.debug(
-                        'Skipping b/c format %s not in %s', fmt, file_formats)
+            resources_to_get = find_resources_to_get(lecture,
+                                                     file_formats,
+                                                     resource_filter,
+                                                     ignored_formats)
 
             # write lecture resources
             for fmt, url, title in resources_to_get:
+
                 if combined_section_lectures_nums:
                     lecfn = os.path.join(
                         sec,
@@ -394,10 +578,10 @@ def download_lectures(downloader,
                     lecfn = os.path.join(
                         sec, format_resource(lecnum + 1, lecname, title, fmt))
 
-                if overwrite or not os.path.exists(lecfn):
+                if overwrite or not os.path.exists(lecfn) or resume:
                     if not skip_download:
                         logging.info('Downloading: %s', lecfn)
-                        downloader.download(url, lecfn)
+                        downloader.download(url, lecfn, resume=resume)
                     else:
                         open(lecfn, 'w').close()  # touch
                     last_update = time.time()
@@ -431,13 +615,10 @@ def download_lectures(downloader,
 
     # if we haven't updated any files in 1 month, we're probably
     # done with this course
-    if last_update >= 0:
-        delta = time.time() - last_update
-        max_delta = total_seconds(datetime.timedelta(days=30))
-        if delta > max_delta:
-            logging.info('COURSE PROBABLY COMPLETE: ' + class_name)
-            return True
-    return False
+    rv = is_course_complete(last_update)
+    if rv:
+        logging.info('COURSE PROBABLY COMPLETE: ' + class_name)
+    return rv
 
 
 def total_seconds(td):
@@ -447,10 +628,10 @@ def total_seconds(td):
     Added for backward compatibility, pre 2.7.
     """
     return (td.microseconds +
-            (td.seconds + td.days * 24 * 3600) * 10**6) // 10**6
+            (td.seconds + td.days * 24 * 3600) * 10 ** 6) // 10 ** 6
 
 
-def parseArgs(args=None):
+def parse_args(args=None):
     """
     Parse the arguments/options passed to the program on the command line.
     """
@@ -458,136 +639,155 @@ def parseArgs(args=None):
     parser = argparse.ArgumentParser(
         description='Download Coursera.org lecture material and resources.')
 
-    # positional
-    parser.add_argument('class_names',
-                        action='store',
-                        nargs='+',
-                        help='name(s) of the class(es) (e.g. "nlp")')
+    # Basic options
+    group_basic = parser.add_argument_group('Basic options')
 
-    parser.add_argument('-c',
-                        '--cookies_file',
-                        dest='cookies_file',
-                        action='store',
-                        default=None,
-                        help='full path to the cookies.txt file')
-    parser.add_argument('-u',
-                        '--username',
-                        dest='username',
-                        action='store',
-                        default=None,
-                        help='coursera username')
-    parser.add_argument('-n',
-                        '--netrc',
-                        dest='netrc',
-                        nargs='?',
-                        action='store',
-                        const=True,
-                        default=False,
-                        help='use netrc for reading passwords, uses default'
-                             ' location if no path specified')
+    group_basic.add_argument('class_names',
+                             action='store',
+                             nargs='+',
+                             help='name(s) of the class(es) (e.g. "ml-005")')
 
-    parser.add_argument('-p',
-                        '--password',
-                        dest='password',
-                        action='store',
-                        default=None,
-                        help='coursera password')
+    group_basic.add_argument('-u',
+                             '--username',
+                             dest='username',
+                             action='store',
+                             default=None,
+                             help='coursera username')
 
-    # optional
-    parser.add_argument('--about',
-                        dest='about',
+    group_basic.add_argument('-p',
+                             '--password',
+                             dest='password',
+                             action='store',
+                             default=None,
+                             help='coursera password')
+
+    group_basic.add_argument('--on-demand',
+                             dest='on_demand',
+                             action='store_true',
+                             default=False,
+                             help='[DEPRECATED] get on-demand videos. Do not use'
+                             ' this option, it is deprecated. The script will'
+                             ' try to detect course type automatically.')
+
+    group_basic.add_argument('-b',  # FIXME: kill this one-letter option
+                             '--preview',
+                             dest='preview',
+                             action='store_true',
+                             default=False,
+                             help='get videos from preview pages. (Default: False)')
+
+    group_basic.add_argument('--path',
+                             dest='path',
+                             action='store',
+                             default='',
+                             help='path to where to save the file. (Default: current directory)')
+
+    group_basic.add_argument('-sl',  # FIXME: deprecate this option
+                             '--subtitle-language',
+                             dest='subtitle_language',
+                             action='store',
+                             default='en',
+                             help='Choose language to download subtitles. (Default: en)')
+
+    # Selection of material to download
+    group_material = parser.add_argument_group('Selection of material to download')
+
+    group_material.add_argument('--about',  # FIXME: should be --about-course
+                                dest='about',
+                                action='store_true',
+                                default=False,
+                                help='download "about" metadata. (Default: False)')
+
+    group_material.add_argument('-f',
+                                '--formats',
+                                dest='file_formats',
+                                action='store',
+                                default='all',
+                                help='file format extensions to be downloaded in'
+                                ' quotes space separated, e.g. "mp4 pdf" '
+                                '(default: special value "all")')
+
+    group_material.add_argument('--ignore-formats',
+                                dest='ignore_formats',
+                                action='store',
+                                default=None,
+                                help='file format extensions of resources to ignore'
+                                ' (default: None)')
+
+    group_material.add_argument('-sf',  # FIXME: deprecate this option
+                                '--section_filter',
+                                dest='section_filter',
+                                action='store',
+                                default=None,
+                                help='only download sections which contain this'
+                                ' regex (default: disabled)')
+
+    group_material.add_argument('-lf',  # FIXME: deprecate this option
+                                '--lecture_filter',
+                                dest='lecture_filter',
+                                action='store',
+                                default=None,
+                                help='only download lectures which contain this regex'
+                                ' (default: disabled)')
+
+    group_material.add_argument('-rf',  # FIXME: deprecate this option
+                                '--resource_filter',
+                                dest='resource_filter',
+                                action='store',
+                                default=None,
+                                help='only download resources which match this regex'
+                                ' (default: disabled)')
+
+    group_material.add_argument('--video-resolution',
+                                dest='video_resolution',
+                                action='store',
+                                default='540p',
+                                help='video resolution to download (default: 540p); '
+                                'only valid for on-demand courses; '
+                                'only values allowed: 360p, 540p, 720p')
+
+    # Selection of material to download
+    group_external_dl = parser.add_argument_group('External downloaders')
+
+    group_external_dl.add_argument('--wget',
+                                   dest='wget',
+                                   action='store',
+                                   nargs='?',
+                                   const='wget',
+                                   default=None,
+                                   help='use wget for downloading,'
+                                   'optionally specify wget bin')
+    group_external_dl.add_argument('--curl',
+                                   dest='curl',
+                                   action='store',
+                                   nargs='?',
+                                   const='curl',
+                                   default=None,
+                                   help='use curl for downloading,'
+                                   ' optionally specify curl bin')
+    group_external_dl.add_argument('--aria2',
+                                   dest='aria2',
+                                   action='store',
+                                   nargs='?',
+                                   const='aria2c',
+                                   default=None,
+                                   help='use aria2 for downloading,'
+                                   ' optionally specify aria2 bin')
+    group_external_dl.add_argument('--axel',
+                                   dest='axel',
+                                   action='store',
+                                   nargs='?',
+                                   const='axel',
+                                   default=None,
+                                   help='use axel for downloading,'
+                                   ' optionally specify axel bin')
+
+    parser.add_argument('--resume',
+                        dest='resume',
                         action='store_true',
                         default=False,
-                        help='download "about" metadata. (Default: False)')
-    parser.add_argument('-b',
-                        '--preview',
-                        dest='preview',
-                        action='store_true',
-                        default=False,
-                        help='get preview videos. (Default: False)')
-    parser.add_argument('-f',
-                        '--formats',
-                        dest='file_formats',
-                        action='store',
-                        default='all',
-                        help='file format extensions to be downloaded in'
-                             ' quotes space separated, e.g. "mp4 pdf" '
-                             '(default: special value "all")')
-    parser.add_argument('-sf',
-                        '--section_filter',
-                        dest='section_filter',
-                        action='store',
-                        default=None,
-                        help='only download sections which contain this'
-                             ' regex (default: disabled)')
-    parser.add_argument('-lf',
-                        '--lecture_filter',
-                        dest='lecture_filter',
-                        action='store',
-                        default=None,
-                        help='only download lectures which contain this regex'
-                             ' (default: disabled)')
-    parser.add_argument('-rf',
-                        '--resource_filter',
-                        dest='resource_filter',
-                        action='store',
-                        default=None,
-                        help='only download resources which match this regex'
-                             ' (default: disabled)')
-    parser.add_argument('--wget',
-                        dest='wget',
-                        action='store',
-                        nargs='?',
-                        const='wget',
-                        default=None,
-                        help='use wget for downloading,'
-                             'optionally specify wget bin')
-    parser.add_argument('--curl',
-                        dest='curl',
-                        action='store',
-                        nargs='?',
-                        const='curl',
-                        default=None,
-                        help='use curl for downloading,'
-                             ' optionally specify curl bin')
-    parser.add_argument('--aria2',
-                        dest='aria2',
-                        action='store',
-                        nargs='?',
-                        const='aria2c',
-                        default=None,
-                        help='use aria2 for downloading,'
-                             ' optionally specify aria2 bin')
-    parser.add_argument('--axel',
-                        dest='axel',
-                        action='store',
-                        nargs='?',
-                        const='axel',
-                        default=None,
-                        help='use axel for downloading,'
-                             ' optionally specify axel bin')
-    # We keep the wget_bin, ... options for backwards compatibility.
-    parser.add_argument('-w',
-                        '--wget_bin',
-                        dest='wget_bin',
-                        action='store',
-                        default=None,
-                        help='DEPRECATED, use --wget')
-    parser.add_argument('--curl_bin',
-                        dest='curl_bin',
-                        action='store',
-                        default=None,
-                        help='DEPRECATED, use --curl')
-    parser.add_argument('--aria2_bin',
-                        dest='aria2_bin',
-                        action='store',
-                        default=None,
-                        help='DEPRECATED, use --aria2')
-    parser.add_argument('--axel_bin',
-                        dest='axel_bin',
-                        action='store',
-                        default=None,
-                        help='DEPRECATED, use --axel')
+                        help='resume incomplete downloads (default: False)')
+
     parser.add_argument('-o',
                         '--overwrite',
                         dest='overwrite',
@@ -595,77 +795,112 @@ def parseArgs(args=None):
                         default=False,
                         help='whether existing files should be overwritten'
                              ' (default: False)')
-    parser.add_argument('-l',
-                        '--process_local_page',
-                        dest='local_page',
-                        help='uses or creates local cached version of syllabus'
-                             ' page')
-    parser.add_argument('--skip-download',
-                        dest='skip_download',
-                        action='store_true',
-                        default=False,
-                        help='for debugging: skip actual downloading of files')
-    parser.add_argument('--path',
-                        dest='path',
-                        action='store',
-                        default='',
-                        help='path to save the file')
+
     parser.add_argument('--verbose-dirs',
                         dest='verbose_dirs',
                         action='store_true',
                         default=False,
                         help='include class name in section directory name')
-    parser.add_argument('--debug',
-                        dest='debug',
-                        action='store_true',
-                        default=False,
-                        help='print lots of debug information')
+
     parser.add_argument('--quiet',
                         dest='quiet',
                         action='store_true',
                         default=False,
                         help='omit as many messages as possible'
                              ' (only printing errors)')
-    parser.add_argument('--add-class',
-                        dest='add_class',
-                        action='append',
-                        default=[],
-                        help='additional classes to get')
+
     parser.add_argument('-r',
                         '--reverse',
                         dest='reverse',
                         action='store_true',
                         default=False,
                         help='download sections in reverse order')
+
     parser.add_argument('--combined-section-lectures-nums',
                         dest='combined_section_lectures_nums',
                         action='store_true',
                         default=False,
                         help='include lecture and section name in final files')
-    parser.add_argument('--hook',
-                        dest='hooks',
-                        action='append',
-                        default=[],
-                        help='hooks to run when finished')
-    parser.add_argument('-pl',
-                        '--playlist',
-                        dest='playlist',
-                        action='store_true',
-                        default=False,
-                        help='generate M3U playlists for course weeks')
-    parser.add_argument('--clear-cache',
-                        dest='clear_cache',
-                        action='store_true',
-                        default=False,
-                        help='clear cached cookies')
+
     parser.add_argument('--unrestricted-filenames',
                         dest='intact_fnames',
                         action='store_true',
                         default=False,
                         help='Do not limit filenames to be ASCII-only')
 
-    args = parser.parse_args(args)
+    # Advanced authentication
+    group_adv_auth = parser.add_argument_group('Advanced authentication options')
 
+    group_adv_auth.add_argument('-c',
+                                '--cookies_file',
+                                dest='cookies_file',
+                                action='store',
+                                default=None,
+                                help='full path to the cookies.txt file')
+
+    group_adv_auth.add_argument('-n',
+                                '--netrc',
+                                dest='netrc',
+                                nargs='?',
+                                action='store',
+                                const=True,
+                                default=False,
+                                help='use netrc for reading passwords, uses default'
+                                ' location if no path specified')
+
+    group_adv_auth.add_argument('-k',
+                                '--keyring',
+                                dest='use_keyring',
+                                action='store_true',
+                                default=False,
+                                help='use keyring provided by operating system to '
+                                'save and load credentials')
+
+    group_adv_auth.add_argument('--clear-cache',
+                                dest='clear_cache',
+                                action='store_true',
+                                default=False,
+                                help='clear cached cookies')
+
+    # Advanced miscellaneous options
+    group_adv_misc = parser.add_argument_group('Advanced miscellaneous options')
+
+    group_adv_misc.add_argument('--hook',
+                                dest='hooks',
+                                action='append',
+                                default=[],
+                                help='hooks to run when finished')
+
+    group_adv_misc.add_argument('-pl',
+                                '--playlist',
+                                dest='playlist',
+                                action='store_true',
+                                default=False,
+                                help='generate M3U playlists for course weeks')
+
+    # Debug options
+    group_debug = parser.add_argument_group('Debugging options')
+
+    group_debug.add_argument('--skip-download',
+                             dest='skip_download',
+                             action='store_true',
+                             default=False,
+                             help='for debugging: skip actual downloading of files')
+
+    group_debug.add_argument('--debug',
+                             dest='debug',
+                             action='store_true',
+                             default=False,
+                             help='print lots of debug information')
+
+    group_debug.add_argument('-l',  # FIXME: remove short option from rarely used ones
+                             '--process_local_page',
+                             dest='local_page',
+                             help='uses or creates local cached version of syllabus'
+                             ' page')
+
+    # Final parsing of the options
+    args = parser.parse_args(args)
 
     # Initialize the logging system first so that other functions
     # can use it right away
@@ -686,13 +921,15 @@ def parseArgs(args=None):
     # versions on Python
     args.path = decode_input(args.path)
 
-    for bin in ['wget_bin', 'curl_bin', 'aria2_bin', 'axel_bin']:
-        if getattr(args, bin):
-            logging.error('The --%s option is deprecated, please use --%s',
-                          bin, bin[:-4])
-            sys.exit(1)
-
     # check arguments
+    if args.use_keyring and args.password:
+        logging.warning('--keyring and --password cannot be specified together')
+        args.use_keyring = False
+
+    if args.use_keyring and not keyring:
+        logging.warning('The python module `keyring` not found.')
+        args.use_keyring = False
+
     if args.cookies_file and not os.path.exists(args.cookies_file):
         logging.error('Cookies file not found: %s', args.cookies_file)
         sys.exit(1)
@@ -701,7 +938,7 @@ def parseArgs(args=None):
         try:
             args.username, args.password = get_credentials(
                 username=args.username, password=args.password,
-                netrc=args.netrc)
+                netrc=args.netrc, use_keyring=args.use_keyring)
         except CredentialsError as e:
             logging.error(e)
             sys.exit(1)
@@ -709,58 +946,147 @@ def parseArgs(args=None):
     return args
 
 
-def download_class(args, class_name):
+def download_old_style_class(args, class_name):
     """
     Download all requested resources from the class given in class_name.
+    Old style classes are classes located at class.coursera.org.
+    Read more about course types here:
+    https://learner.coursera.help/hc/en-us/articles/203879739-Course-Types
+
     Returns True if the class appears completed.
     """
-
-    session = requests.Session()
+    session = get_session()
 
     if args.preview:
         # Todo, remove this.
         session.cookie_values = 'dummy=dummy'
     else:
-        get_cookies_for_class(
-            session,
-            class_name,
-            cookies_file=args.cookies_file,
-            username=args.username, password=args.password
-        )
+        get_cookies_for_class(session,
+                              class_name,
+                              cookies_file=args.cookies_file,
+                              username=args.username, password=args.password)
         session.cookie_values = make_cookie_values(session.cookies, class_name)
 
+    subtitle_language = args.subtitle_language
+    if args.about or args.subtitle_language != 'en':
+        about = download_about(session,
+                               class_name,
+                               args.path,
+                               args.overwrite,
+                               args.subtitle_language)
+        # Check if subtitle is available
+        if not about or not about["subtitleLanguagesCsv"].split(',').count(args.subtitle_language):
+            logging.warning("Subtitle unavailable in specified language")
+            subtitle_language = "en"
+
     # get the syllabus listing
-    page = get_syllabus(session, class_name, args.local_page, args.preview)
+    page = get_old_style_syllabus(session, class_name,
+                                  args.local_page, args.preview)
 
     # parse it
-    sections = parse_syllabus(session, page, args.reverse,
-                              args.intact_fnames)
+    sections = parse_old_style_syllabus(session, page, args.reverse,
+                                        args.intact_fnames, subtitle_language)
 
-    if args.about:
-        download_about(session, class_name, args.path, args.overwrite)
+    downloader = get_downloader(session, class_name, args)
+
+    ignored_formats = []
+    if args.ignore_formats:
+        ignored_formats = args.ignore_formats.split(",")
+
+    # obtain the resources
+    completed = download_lectures(downloader,
+                                  class_name,
+                                  sections,
+                                  args.file_formats,
+                                  args.overwrite,
+                                  args.skip_download,
+                                  args.section_filter,
+                                  args.lecture_filter,
+                                  args.resource_filter,
+                                  args.path,
+                                  args.verbose_dirs,
+                                  args.preview,
+                                  args.combined_section_lectures_nums,
+                                  args.hooks,
+                                  args.playlist,
+                                  args.intact_fnames,
+                                  ignored_formats,
+                                  args.resume,
+                                  args.video_resolution)
+
+    return completed
+
+
+def download_on_demand_class(args, class_name):
+    """
+    Download all requested resources from the on-demand class given in class_name.
+
+    Returns True if the class appears completed.
+    """
+
+    session = get_session()
+    login(session, args.username, args.password)
+
+    # get the syllabus listing
+    page = get_on_demand_syllabus(session, class_name)
+
+    ignored_formats = []
+    if args.ignore_formats:
+        ignored_formats = args.ignore_formats.split(",")
+
+    # parse it
+    modules = parse_on_demand_syllabus(session, page,
+                                       args.reverse,
+                                       args.intact_fnames,
+                                       args.subtitle_language,
+                                       args.video_resolution)
 
     downloader = get_downloader(session, class_name, args)
 
     # obtain the resources
-    completed = download_lectures(
-        downloader,
-        class_name,
-        sections,
-        args.file_formats,
-        args.overwrite,
-        args.skip_download,
-        args.section_filter,
-        args.lecture_filter,
-        args.resource_filter,
-        args.path,
-        args.verbose_dirs,
-        args.preview,
-        args.combined_section_lectures_nums,
-        args.hooks,
-        args.playlist,
-        args.intact_fnames)
+    completed = True
+    for idx, module in enumerate(modules):
+        module_name = '%02d_%s' % (idx + 1, module[0])
+        sections = module[1]
+
+        result = download_lectures(
+            downloader,
+            module_name,
+            sections,
+            args.file_formats,
+            args.overwrite,
+            args.skip_download,
+            args.section_filter,
+            args.lecture_filter,
+            args.resource_filter,
+            os.path.join(args.path, class_name),
+            args.verbose_dirs,
+            args.preview,
+            args.combined_section_lectures_nums,
+            args.hooks,
+            args.playlist,
+            args.intact_fnames,
+            ignored_formats,
+            args.resume
+        )
+        completed = completed and result
 
     return completed
+
+
+def download_class(args, class_name):
+    """
+    Try to download class as if it were an old style class, and if it fails,
+    try it as an on-demand class.
+
+    Returns True if the class appears completed.
+    """
+    try:
+        logging.debug('Downloading old style class %s', class_name)
+        return download_old_style_class(args, class_name)
+    except ClassNotFound:
+        logging.debug('Downloading new style (on demand) class %s', class_name)
+        return download_on_demand_class(args, class_name)
 
 
 def main():
@@ -768,12 +1094,16 @@ def main():
     Main entry point for execution as a program (instead of as a module).
     """
 
-    args = parseArgs()
+    args = parse_args()
     completed_classes = []
 
     mkdir_p(PATH_CACHE, 0o700)
     if args.clear_cache:
         shutil.rmtree(PATH_CACHE)
+    if args.on_demand:
+        logging.warning('--on-demand option is deprecated and is not required'
+                        ' anymore. Do not use this option. It will be removed'
+                        'in the future.')
 
     for class_name in args.class_names:
         try:
