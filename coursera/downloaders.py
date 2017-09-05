@@ -12,13 +12,17 @@ from __future__ import print_function
 import logging
 import math
 import os
-import requests
 import subprocess
 import sys
 import time
 
+import requests
+
 from six import iteritems
 
+#
+# Below are file downloaders, they are wrappers for external downloaders.
+#
 
 class Downloader(object):
     """
@@ -74,9 +78,10 @@ class ExternalDownloader(Downloader):
     # External downloader binary
     bin = None
 
-    def __init__(self, session, bin=None):
+    def __init__(self, session, bin=None, downloader_arguments=None):
         self.session = session
         self.bin = bin or self.__class__.bin
+        self.downloader_arguments = downloader_arguments or []
 
         if not self.bin:
             raise RuntimeError("No bin specified")
@@ -118,6 +123,7 @@ class ExternalDownloader(Downloader):
 
     def _start_download(self, url, filename, resume):
         command = self._create_command(url, filename)
+        command.extend(self.downloader_arguments)
         self._prepare_cookies(command, url)
         if resume:
             self._enable_resume(command)
@@ -316,9 +322,10 @@ class NativeDownloader(Downloader):
         else:
             logging.info('Downloading %s -> %s', url, filename)
 
+        max_attempts = 3
         attempts_count = 0
         error_msg = ''
-        while attempts_count < 5:
+        while attempts_count < max_attempts:
             r = self.session.get(url, stream=True, headers=headers)
 
             if r.status_code != 200:
@@ -335,9 +342,7 @@ class NativeDownloader(Downloader):
                     r.close()
                     return True
                 else:
-                    print(r.status_code)
-                    print(url)
-                    print(filesize)
+                    print('%s %s %s' % (r.status_code, url, filesize))
                     logging.warn('Probably the file is missing from the AWS '
                                  'repository...  waiting.')
 
@@ -375,7 +380,7 @@ class NativeDownloader(Downloader):
             r.close()
             return True
 
-        if attempts_count == 5:
+        if attempts_count == max_attempts:
             logging.warn('Skipping, can\'t download file ...')
             logging.error(error_msg)
             return False
@@ -395,6 +400,7 @@ def get_downloader(session, class_name, args):
 
     for bin, class_ in iteritems(external):
         if getattr(args, bin):
-            return class_(session, bin=getattr(args, bin))
+            return class_(session, bin=getattr(args, bin),
+                          downloader_arguments=args.downloader_arguments)
 
     return NativeDownloader(session)

@@ -1,10 +1,34 @@
 # Coursera Downloader
 
 [![Build Status](https://travis-ci.org/coursera-dl/coursera-dl.svg?branch=master)](https://travis-ci.org/coursera-dl/coursera-dl)
-[![Coverage Status](https://coveralls.io/repos/coursera-dl/coursera/badge.png)](https://coveralls.io/r/coursera-dl/coursera)
-[![Latest version on PyPI](https://img.shields.io/pypi/v/coursera.svg)](https://pypi.python.org/pypi/coursera)
-[![Downloads from PyPI](https://img.shields.io/pypi/dm/coursera.svg)](https://pypi.python.org/pypi/coursera)
-[![Code Climate](https://codeclimate.com/github/coursera-dl/coursera/badges/gpa.svg)](https://codeclimate.com/github/coursera-dl/coursera)
+[![Build status](https://ci.appveyor.com/api/projects/status/3hru0ycv5fbny5k8/branch/master?svg=true)](https://ci.appveyor.com/project/balta2ar/coursera-dl/branch/master)
+[![Coverage Status](https://coveralls.io/repos/coursera-dl/coursera-dl/badge.svg)](https://coveralls.io/r/coursera-dl/coursera-dl)
+[![Latest version on PyPI](https://img.shields.io/pypi/v/coursera-dl.svg)](https://pypi.python.org/pypi/coursera-dl)
+[![Downloads from PyPI](https://img.shields.io/pypi/dm/coursera-dl.svg)](https://pypi.python.org/pypi/coursera-dl)
+[![Code Climate](https://codeclimate.com/github/coursera-dl/coursera-dl/badges/gpa.svg)](https://codeclimate.com/github/coursera-dl/coursera-dl)
+
+- [Introduction](#introduction)
+- [Features](#features)
+- [Disclaimer](#disclaimer)
+- [Installation instructions](#installation-instructions)
+    - [Recommended installation method for all Operating Systems](#recommended-installation-method-for-all-operating-systems)
+    - [Alternative ways of installing missing dependencies](#alternative-ways-of-installing-missing-dependencies)
+        - [Alternative installation method for Unix systems](#alternative-installation-method-for-unix-systems)
+        - [Installing dependencies on your own](#installing-dependencies-on-your-own)
+    - [Windows](#windows)
+    - [Create an account with Coursera](#create-an-account-with-coursera)
+    - [Running the script](#running-the-script)
+    - [Resuming downloads](#resuming-downloads)
+- [Troubleshooting](#troubleshooting)
+    - [China issues](#china-issues)
+    - [Found 0 sections and 0 lectures on this page](#found-0-sections-and-0-lectures-on-this-page)
+    - [Windows: Proxy support](#windows-proxy-support)
+    - [Windows: Failed to create process](#windows-failed-to-create-process)
+    - [SSLError: Errno 1 _ssl.c:504: error:14094410:SSL routines:SSL3_READ_BYTES:sslv3 alert handshake failure](#sslerror-errno-1-_sslc504-error14094410ssl-routinesssl3_read_bytessslv3-alert-handshake-failure)
+- [Reporting issues](#reporting-issues)
+- [Filing an issue/Reporting a bug](#filing-an-issuereporting-a-bug)
+- [Feedback](#feedback)
+- [Contact](#contact)
 
 # Introduction
 
@@ -39,14 +63,15 @@ I've downloaded many other good videos such as those from Khan Academy.
 
 # Features
 
-  * Support for both regular (i.e., time-based) courses as well as on-demand
-    courses.
+  * Support for all kinds of courses (i.e., "Old Platform"/time-based as
+    well as "New Platform"/on-demand courses).
   * Intentionally detailed names, so that it will display and sort properly
     on most interfaces (e.g., [VLC][4] or MX Video on Android devices).
   * Regex-based section (week) and lecture name filters to download only
     certain resources.
   * File format extension filter to grab resource types you want.
   * Login credentials accepted on command-line or from `.netrc` file.
+  * Default arguments loaded from `coursera-dl.conf` file.
   * Core functionality tested on Linux, Mac and Windows.
 
 # Disclaimer
@@ -68,9 +93,9 @@ relevant excerpt:
 # Installation instructions
 
 `coursera-dl` requires Python 2 or Python 3 and a free Coursera account
-enrolled in the class of interest. (At present/May of 2015, we test
+enrolled in the class of interest. (As of February of 2016, we test
 automatically the execution of the program with Python versions 2.6, 2.7,
-Pypy, 3.2, 3.3, and 3.4).
+Pypy, 3.2, 3.3, 3.4, and 3.5).
 
 **Note:** We *strongly* recommend that you use a Python 3 interpreter (3.4
 or later).
@@ -90,10 +115,10 @@ particular courses that you want to use with `coursera-dl`.
 From a command line (preferrably, from a virtual environment), simply issue
 the command:
 
-    pip install coursera
+    pip install coursera-dl
 
 
-This will dowload [the latest released version][23] of the program from the
+This will download [the latest released version][23] of the program from the
 [Python Package Index (PyPI)][22] along with *all* the necessary
 dependencies. At this point, you should be ready to start using it.
 
@@ -101,21 +126,17 @@ If this does not work, because your Python 2 version is too old (e.g. 2.7.5
 on Ubuntu 14.4), try:
 
     apt-get install python3 python3-pip
-    pip3 install coursera
+    pip3 install coursera-dl
 
 instead.
 
-**Note 1:** Note that the PyPI package is called simply `coursera`, but the
-command-line is called `coursera-dl`. This is an unfortunate fact related to
-conflicting names.
-
-**Note 2:** We strongly recommend that you *don't* install the package
+**Note 1:** We strongly recommend that you *don't* install the package
 globally on your machine (i.e., with root/administrator privileges), as the
 installed modules may conflict with other Python applications that you have
 installed in your system (or they can interfere with `coursera-dl`).  Prefer
 to use the option `--user` to `pip install`, if you need can.
 
-**Note 3:** As already mentioned, we *strongly* recommend that you use a new
+**Note 2:** As already mentioned, we *strongly* recommend that you use a new
 Python 3 interpreter (e.g., 3.4 or later), since Python 3 has better support
 for SSL/TLS (for secure connections) than earlier versions.<br/>
 If you must use Python 2, be sure that you have at least Python 2.7.9 (later
@@ -149,8 +170,8 @@ following steps (create/adapt first the directory
     virtualenv my-coursera
     cd my-coursera
     source bin/activate
-    git clone https://github.com/coursera-dl/coursera
-    cd coursera
+    git clone https://github.com/coursera-dl/coursera-dl
+    cd coursera-dl
     pip install -r requirements.txt
     ./coursera-dl ...
 
@@ -158,7 +179,7 @@ To further download new videos from your classes, simply perform:
 
     cd /directory/where/I/want/my/courses/my-coursera
     source bin/activate
-    cd coursera
+    cd coursera-dl
     ./coursera-dl ...
 
 We are working on streamlining this whole process so that it is as simple as
@@ -167,6 +188,9 @@ disabling SSLv3, we have to take a few extra steps.  In any case, it is
 *highly* recommended that you always install the latest version of the
 Python interpreter that you can.
 
+### ArchLinux
+
+AUR package: [coursera-dl](https://aur.archlinux.org/packages/coursera-dl/)
 
 ### Installing dependencies on your own
 
@@ -191,6 +215,26 @@ your own, please check that the versions of your modules are at least those
 listed in the `requirements.txt` file (and, `requirements-dev.txt` file, if
 applicable).
 
+## Windows
+
+`python -m pip install coursera-dl`
+
+Be sure that the Python install path is added to the PATH system environment variables. This can be found in Control Panel > System > Advanced System Settings > Environment Variables. 
+
+```
+Example:
+C:\Python35\Scripts\;C:\Python35\;
+```
+
+Or if you have restricted installation permissions and you've installed Python under AppData, add this to your PATH.
+
+```
+Example:
+C:\Users\<user>\AppData\Local\Programs\Python\Python35-32\Scripts;C:\Users\<user>\AppData\Local\Programs\Python\Python35-32;
+```
+
+Coursera-dl can now be run from commandline or powershell.
+
 ## Create an account with Coursera
 
 If you don't already have one, create a [Coursera][1] account and enroll in
@@ -203,7 +247,6 @@ credentials (e.g. email address and password or a `~/.netrc` file), the
 class names, as well as any additional parameters:
 
     General:                     coursera-dl -u <user> -p <pass> modelthinking-004
-    On-Demand course:            coursera-dl -u <user> -p <pass> --on-demand calculus1
     Multiple classes:            coursera-dl -u <user> -p <pass> saas historyofrock1-001 algo-2012-002
     Filter by section name:      coursera-dl -u <user> -p <pass> -sf "Chapter_Four" crypto-004
     Filter by lecture name:      coursera-dl -u <user> -p <pass> -lf "3.1_" ml-2012-002
@@ -213,9 +256,6 @@ class names, as well as any additional parameters:
     Specify download path:       coursera-dl -n --path=C:\Coursera\Classes\ comnetworks-002
     Display help:                coursera-dl --help
 
-**Note:** Some of the options like `-sf` and `-f` may not work with on-demand courses.
-Downloading on-demand courses are mutually exclusive with regular courses.
-
     Maintain a list of classes in a dir:
       Initialize:              mkdir -p CURRENT/{class1,class2,..classN}
       Update:                  coursera-dl -n --path CURRENT `\ls CURRENT`
@@ -224,9 +264,7 @@ Downloading on-demand courses are mutually exclusive with regular courses.
 may experience problems.  Be sure to escape the `ls` command (use `\ls`) to
 assure that no special characters get sent to the script.
 
-Note that we *do* support the new On Demand classes. You have to use the
-option `--on-demand` for that purpose. You also have to download those
-classes *separately* for regular, time-based classes.
+Note that we *do* support the New Platform ("on-demand") classes.
 
 On \*nix platforms, the use of a `~/.netrc` file is a good alternative to
 specifying both your username (i.e., your email address) and password every
@@ -241,6 +279,23 @@ using `-u` and `-p` to simply call `coursera-dl` with the option `-n`
 instead.  This is especially convenient, as typing usernames (email
 addresses) and passwords directly on the command line can get tiresome (even
 more if you happened to choose a "strong" password).
+
+Alternatively, if you want to store your preferred parameters (which might
+also include your username and password), create a file named `coursera-dl.conf`
+where the script is supposed to be executed, with the following format:
+
+    --username <user>
+    --password <pass>
+    --subtitle-language en,zh-CN|zh-TW
+    --download-quizzes True
+    #--mathjax-cdn https://cdn.bootcss.com/mathjax/2.7.1/MathJax.js
+    # more other parameters
+
+Parameter which is stored in the file will be overriden if it is again specifed
+in your commandline script
+
+**Note:** In `coursera-dl.conf`, all the parameters should not be wrapped
+with quotes.
 
 ## Resuming downloads
 
@@ -281,10 +336,7 @@ one of the following actions solve your problem:
 
 * Make sure the class name you are using corresponds to the resource name
   used in the URL for that class:
-    `https://class.coursera.org/<CLASS_NAME>/class/index`
-
-* To download an On Demand course, use the `--on-demand` option of the
-  program.
+    `https://www.coursera.org/learn/<CLASS_NAME>/home/welcome`
 
 * Have you tried to clean the cached cookies/credentials with the
   `--clear-cache` option?
@@ -308,7 +360,7 @@ one of the following actions solve your problem:
 
 * If results show 0 sections, you most likely have provided invalid
   credentials (username and/or password in the command line or in your
-  `.netrc` file).
+  `.netrc` file or in your `coursera-dl.conf` file).
 
 * For courses that have not started yet, but have had a previous iteration
   sometimes a preview is available, containing all the classes from the last
@@ -330,12 +382,130 @@ one of the following actions solve your problem:
       `.netrc` file and,
     * You want the script to use your default netrc file and,
     * You get a message saying `coursera-dl: error: too few arguments`  
-    
+
       Then you should specify `--` as an argument after `-n`, that is, `-n --`
       or change the order in which you pass the arguments to the script, so that
       the argument after `-n` begins with an hyphen (`-`).  Otherwise, Python's
       `argparse` module will think that what you are passing is the name of the
       netrc file that you want to use. See issue #162.
+
+* If your password has spaces, don't forget to write it using quotes.
+
+* Have you installed the right project ?
+  <br><br>
+  **Warning**: If you installed the script using PyPi (pip) please verify that
+  you installed the correct project. We had to use a different name in pip
+  because our original name was already taken. Remember to install it using:
+  ```
+      pip install coursera-dl
+  ```
+
+## China issues
+
+If you are from China and you're having problems downloading videos,
+adding "52.84.246.72 d3c33hcgiwev3.cloudfront.net" in the hosts file
+(/etc/hosts) and freshing DNS with "ipconfig/flushdns" may work
+(see this [comment](https://github.com/coursera-dl/coursera-dl/issues/606#issuecomment-305698809)).
+
+## Found 0 sections and 0 lectures on this page
+
+First of all, make sure you are enrolled to the course you want to download.
+
+Many old courses have already closed enrollment so often it's not an
+option. In this case, try downloading with `--preview` option. Some
+courses allow to download lecture materials without enrolling, but
+it's not common and is not guaranteed to work for every course.
+
+Finally, you can download the videos if you have, at least, the index
+file that lists all the course materials. Maybe your friend who is enrolled
+could save that course page for you. In that case use the `--process_local_page`
+option.
+
+Alternatively you may want to try this Chrome extension: https://chrome.google.com/webstore/detail/coursera-materials-downlo/ijkboagofaehocnjacacdhdcbbcpilih
+
+If none of the above works for you, there is nothing we can do.
+
+## Windows: proxy support
+
+If you're on Windows behind a proxy, set up the environment variables
+before running the script as follows:
+
+```
+set HTTP_PROXY=http://host:port
+set HTTPS_PROXY=http://host:port
+```
+
+Related discussion: [#205](https://github.com/coursera-dl/coursera-dl/issues/205)
+
+## Windows: Failed to create process
+
+In `C:\Users\<user>\AppData\Local\Programs\Python\Python35-32\Scripts`
+or wherever Python installed (above is default for Windows)
+edit below file in idle: (right click on script name and select 'edit with idle in menu)
+
+```
+coursera-dl-script
+```
+
+from
+
+```
+#!c:\users\<user>\appdata\local\programs\python\python35-32\python.exe
+```
+
+to
+
+```
+#"!c:\users\<user>\appdata\local\programs\python\python35-32\python.exe"
+```
+
+(add quotes). This is a known pip bug.
+
+Source: [issue #500][issue500] [StackOverflow][pipinstallerbug]
+
+## SSLError: [Errno 1] _ssl.c:504: error:14094410:SSL routines:SSL3_READ_BYTES:sslv3 alert handshake failure
+
+This is a known error, please do not report about this error message! The problem is in **YOUR** environment. To fix it, do the following:
+
+``` bash
+sudo apt-get install build-essential python-dev libssl-dev libffi-dev
+pip install --user urllib3 pyasn1 ndg-httpsclient pyOpenSSL
+```
+If the error remains, try installing coursera-dl from github following this instruction:
+https://github.com/coursera-dl/coursera-dl#alternative-installation-method-for-unix-systems
+
+If you still have the problem, please read the following issues for more ideas on how to fix it:
+[#330](https://github.com/coursera-dl/coursera-dl/issues/330)
+[#377](https://github.com/coursera-dl/coursera-dl/issues/377)
+[#329](https://github.com/coursera-dl/coursera-dl/issues/329)
+
+This is also worth reading:
+https://urllib3.readthedocs.io/en/latest/security.html#insecureplatformwarning
+
+## Use an alternative cdn url for `MathJax.js`
+
+When saving a course page, we enabled `MathJax` rendering for math equations, by
+injecting `MathJax.js` in the header. The script is using a cdn service provided
+by [mathjax.org](https://cdn.mathjax.org/mathjax/latest/MathJax.js). However, that
+url is not accessible in some countries/regions, you can provide a 
+`--mathjax-cdn <MATHJAX_CDN>` parameter to specify the `MathJax.js` file that is
+accessible in your region.
+
+# Reporting issues
+
+Before reporting any issue please follow the steps below:
+
+1. Verify that you are running the latest version of the script, and the
+recommended versions of its dependencies, see them in the file
+`requirements.txt`.  Use the following command if in doubt:
+
+        pip install --upgrade coursera-dl
+
+2. If the problem persists, feel free to [open an issue][issue] in our
+bugtracker, please fill the issue template with *as much information as
+possible*.
+
+[issue]: https://github.com/coursera-dl/coursera-dl/issues
 
 # Filing an issue/Reporting a bug
 
@@ -393,28 +563,30 @@ Theodoro de Brito (the current maintainer): rbrito@ime.usp.br (twitter:
 geemail dotcom (twitter: [@jplehmann][12]).
 
 [1]: https://www.coursera.org
-[2]: http://sourceforge.net/projects/gnuwin32/files/wget/1.11.4-1/wget-1.11.4-1-setup.exe
-[3]: https://rg3.github.com/youtube-dl
+[2]: https://sourceforge.net/projects/gnuwin32/files/wget/1.11.4-1/wget-1.11.4-1-setup.exe
+[3]: http://rg3.github.io/youtube-dl
 [4]: https://f-droid.org/repository/browse/?fdid=org.videolan.vlc
-[5]: http://www.crummy.com/software/BeautifulSoup
-[6]: http://pypi.python.org/pypi/argparse
-[7]: http://pypi.python.org/pypi/setuptools
+[5]: https://www.crummy.com/software/BeautifulSoup
+[6]: https://pypi.python.org/pypi/argparse
+[7]: https://pypi.python.org/pypi/setuptools
 [8]: http://stackoverflow.com/a/6031266/962311
-[9]: https://chrome.google.com/webstore/detail/lopabhfecdfhgogdbojmaicoicjekelh
-[10]: https://addons.mozilla.org/en-US/firefox/addon/export-cookies
+[9]: https://chrome.google.com/webstore/detail/cookietxt-export/lopabhfecdfhgogdbojmaicoicjekelh
+[10]: https://addons.mozilla.org/en-US/firefox/addon/export-cookies/
 [11]: https://github.com/coursera-dl/coursera-dl/issues
 [12]: https://twitter.com/jplehmann
-[13]: http://techcrunch.com/2013/02/20/coursera-adds-29-schools-90-courses-and-4-new-languages-to-its-online-learning-platform
+[13]: http://techcrunch.com/2013/02/20/coursera-adds-29-schools-90-courses-and-4-new-languages-to-its-online-learning-platform/
 [14]: http://www.tunapanda.org
 [15]: https://github.com/html5lib/html5lib-python
 [16]: http://docs.python-requests.org/en/latest/
-[17]: http://www.pip-installer.org/en/latest/
-[18]: http://python-distribute.org/pip_distribute.png
+[17]: https://pip.pypa.io/en/latest/
+[18]: http://ww45.python-distribute.org/pip_distribute.png
 [19]: https://pypi.python.org/pypi/six/
 [20]: https://www.coursera.org/about/terms
 [21]: https://twitter.com/rtdbrito
-[22]: http://pypi.python.org/
-[23]: http://pypi.python.org/pypi/coursera
+[22]: https://pypi.python.org/
+[23]: https://pypi.python.org/pypi/coursera-dl
 [issue213]: https://github.com/coursera-dl/coursera-dl/issues/213
+[issue500]: https://github.com/coursera-dl/coursera-dl/issues/500
+[pipinstallerbug]: http://stackoverflow.com/questions/31808180/installing-pyinstaller-via-pip-leads-to-failed-to-create-process
 
-[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/coursera-dl/coursera/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
+[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/coursera-dl/coursera-dl/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
